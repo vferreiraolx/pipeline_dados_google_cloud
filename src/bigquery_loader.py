@@ -1,0 +1,244 @@
+"""
+Loader de dados do GCS para BigQuery e executor de transformações SQL.
+
+Responsável por carregar dados CSV do GCS em tabelas BigQuery (modo full
+e incremental) e executar queries SQL para criação de tabelas derivadas.
+Todas as mensagens de log são em português.
+"""
+
+import logging
+import re
+
+from google.cloud import bigquery
+
+logger = logging.getLogger(__name__)
+
+
+class BigQueryLoader:
+    """Carrega dados do GCS no BigQuery e executa transformações SQL.
+
+    Responsável por:
+    - Carga completa (full): cria tabela se não existe e substitui conteúdo
+      com WRITE_TRUNCATE.
+    - Carga incremental: deduplicação por coluna de partição (DELETE registros
+      com mesmo valor de dt, depois INSERT novos registros).
+    - Execução de tabelas derivadas via SQL com WRITE_TRUNCATE.
+    - Tratamento de falhas por tabela: registra erro e não lança exceção,
+      permitindo que o orchestrator continue com as próximas tabelas.
+
+    Attributes:
+        project: ID do projeto GCP.
+    """
+
+    def __init__(self, project: str = "conect-python-g-sheets"):
+        """Inicializa cliente BigQuery.
+
+        Args:
+            project: ID do projeto GCP. Padrão: 'conect-python-g-sheets'.
+        """
+        self.project = project
+        self._client = bigquery.Client(project=self.project)
+
+    def load_full(self, gcs_uri: str, table_id: str) -> None:
+        """Carga completa: cria tabela se não existe e substitui todo o conteúdo.
+
+        Utiliza WRITE_TRUNCATE para substituir integralmente o conteúdo da
+        tabela de destino. O schema é auto-detectado a partir do CSV.
+
+        Args:
+            gcs_uri: URI do arquivo no GCS (ex: gs://bucket/path.csv).
+            table_id: ID completo da tabela BigQuery de destino
+                (ex: projeto.dataset.tabela).
+
+        Raises:
+            Não lança exceção. Registra erro via logging em caso de falha.
+        """
+        try:
+            logger.info(
+                "[CARGA_BQ] [INICIO] Tabela: %s | Modo: FULL | "
+                "Origem: %s",
+                table_id,
+                gcs_uri,
+            )
+
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                autodetect=True,
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+                skip_leading_rows=1,
+            )
+
+            load_job = self._client.load_table_from_uri(
+                gcs_uri,
+                table_id,
+                job_config=job_config,
+            )
+
+            load_job.result()  # Aguarda conclusão
+
+            table = self._client.get_table(table_id)
+            logger.info(
+                "[CARGA_BQ] [SUCESSO] Tabela: %s | Registros: %d | "
+                "Carga completa concluída",
+                table_id,
+                table.num_rows,
+            )
+
+        except Exception as e:
+            logger.error(
+                "[CARGA_BQ] [FALHA] Tabela: %s | Modo: FULL | "
+                "Erro: %s",
+                table_id,
+                str(e),
+            )
+
+    def load_incremental(
+        self, gcs_uri: str, table_id: str, partition_column: str = "dt"
+    ) -> None:
+        """Carga incremental: deduplicação por coluna de partição (DELETE + INSERT).
+
+        Estratégia:
+        1. Extrai a data do nome do arquivo no gcs_uri (padrão: tabela_YYYY-MM-DD.csv)
+        2. Executa DELETE FROM tabela WHERE partition_column = 'data'
+        3. Carrega o CSV com WRITE_APPEND
+
+        Args:
+            gcs_uri: URI do arquivo no GCS (ex: gs://bucket/table/table_2024-01-15.csv).
+            table_id: ID completo da tabela BigQuery de destino.
+            partition_column: Nome da coluna de partição para deduplicação.
+                Padrão: 'dt'.
+
+        Raises:
+            Não lança exceção. Registra erro via logging em caso de falha.
+        """
+        try:
+            logger.info(
+                "[CARGA_BQ] [INICIO] Tabela: %s | Modo: INCREMENTAL | "
+                "Origem: %s | Coluna partição: %s",
+                table_id,
+                gcs_uri,
+                partition_column,
+            )
+
+            # Extrair data do nome do arquivo (padrão: tabela_YYYY-MM-DD.csv)
+            partition_date = self._extract_date_from_uri(gcs_uri)
+
+            if partition_date is None:
+                logger.error(
+                    "[CARGA_BQ] [FALHA] Tabela: %s | Não foi possível "
+                    "extrair data do URI: %s",
+                    table_id,
+                    gcs_uri,
+                )
+                return
+
+            # Passo 1: DELETE registros existentes com a mesma data de partição
+            delete_query = (
+                f"DELETE FROM `{table_id}` "
+                f"WHERE {partition_column} = '{partition_date}'"
+            )
+
+            logger.info(
+                "[CARGA_BQ] [DEDUPLICAÇÃO] Tabela: %s | "
+                "Removendo registros com %s = '%s'",
+                table_id,
+                partition_column,
+                partition_date,
+            )
+
+            query_job = self._client.query(delete_query)
+            query_job.result()  # Aguarda conclusão do DELETE
+
+            # Passo 2: Carregar novos dados com WRITE_APPEND
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                autodetect=True,
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                skip_leading_rows=1,
+            )
+
+            load_job = self._client.load_table_from_uri(
+                gcs_uri,
+                table_id,
+                job_config=job_config,
+            )
+
+            load_job.result()  # Aguarda conclusão do LOAD
+
+            table = self._client.get_table(table_id)
+            logger.info(
+                "[CARGA_BQ] [SUCESSO] Tabela: %s | Registros: %d | "
+                "Carga incremental concluída (dt='%s')",
+                table_id,
+                table.num_rows,
+                partition_date,
+            )
+
+        except Exception as e:
+            logger.error(
+                "[CARGA_BQ] [FALHA] Tabela: %s | Modo: INCREMENTAL | "
+                "Erro: %s",
+                table_id,
+                str(e),
+            )
+
+    def execute_derived_table(self, query: str, destination_table: str) -> None:
+        """Executa SQL de transformação e grava resultado com WRITE_TRUNCATE.
+
+        Executa uma query SQL de transformação e grava o resultado na tabela
+        de destino, substituindo integralmente o conteúdo anterior.
+
+        Args:
+            query: Query SQL de transformação a ser executada.
+            destination_table: ID completo da tabela BigQuery de destino
+                (ex: projeto.dataset.tabela_derivada).
+
+        Raises:
+            Não lança exceção. Registra erro via logging em caso de falha.
+        """
+        try:
+            logger.info(
+                "[TABELA_DERIVADA] [INICIO] Tabela destino: %s | "
+                "Executando transformação SQL",
+                destination_table,
+            )
+
+            job_config = bigquery.QueryJobConfig(
+                destination=destination_table,
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            )
+
+            query_job = self._client.query(query, job_config=job_config)
+            query_job.result()  # Aguarda conclusão
+
+            table = self._client.get_table(destination_table)
+            logger.info(
+                "[TABELA_DERIVADA] [SUCESSO] Tabela destino: %s | "
+                "Registros: %d | Transformação concluída",
+                destination_table,
+                table.num_rows,
+            )
+
+        except Exception as e:
+            logger.error(
+                "[TABELA_DERIVADA] [FALHA] Tabela destino: %s | "
+                "Erro: %s",
+                destination_table,
+                str(e),
+            )
+
+    def _extract_date_from_uri(self, gcs_uri: str) -> str | None:
+        """Extrai a data do nome do arquivo no URI do GCS.
+
+        Espera o padrão: gs://bucket/table_name/table_name_YYYY-MM-DD.csv
+
+        Args:
+            gcs_uri: URI completo do arquivo no GCS.
+
+        Returns:
+            String da data no formato 'YYYY-MM-DD' ou None se não encontrada.
+        """
+        match = re.search(r"(\d{4}-\d{2}-\d{2})\.csv$", gcs_uri)
+        if match:
+            return match.group(1)
+        return None

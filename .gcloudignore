@@ -1,0 +1,34 @@
+# Ignorar no deploy da Cloud Function
+.git
+.gitignore
+.vscode
+.kiro
+.pytest_cache
+__pycache__
+*.pyc
+
+# Arquivos de investigacao/teste local
+docs/
+tests/
+Script_Formulas_Sheets/
+comparar_*.py
+investigar_*.py
+gerar_relatorio_colunas.py
+pipeline_local.py
+comparar_bd_full.py
+comparar_bd_full_v2.py
+comparar_csvs.py
+PLANO_INVESTIGACAO_PP.md
+
+# Arquivos de dados
+*.csv
+*.parquet
+
+# Scripts de deploy/setup
+deploy.sh
+setup_scheduler.sh
+agendador_script.bat
+
+# Arquivo com erro de sintaxe
+src/sheets_logic_to_sql_spec.py
+src/sheets_structure_inspector.py

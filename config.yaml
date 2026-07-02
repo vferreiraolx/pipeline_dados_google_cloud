@@ -1,0 +1,94 @@
+# Configuração do Pipeline de Dados - Planejamento Comercial
+project_id: "conect-python-g-sheets"
+bucket_name: "teste-extracao-trino"
+
+trino:
+  host: "trino-gateway.dataeng.bigdata.olxbr.io"
+  port: 443
+  protocol: "https"
+  source: "dataeng-trino-api"
+  timeout_seconds: 30
+  retry_attempts: 3
+  retry_interval_seconds: 5
+
+extraction:
+  batch_size: 100000
+  tables:
+    - full_name: "hive.planejamento.re_gold_receita_unificado_air"
+      short_name: "re_gold_receita_unificado_air"
+      partition_column: "dt"
+    - full_name: "hive.planejamento.re_silver_receita_cb_air"
+      short_name: "re_silver_receita_cb_air"
+      partition_column: "dt"
+    - full_name: "hive.planejamento.re_silver_planos_periodicos_cb"
+      short_name: "re_silver_planos_periodicos_cb"
+      partition_column: "dt"
+      use_max_dt: true
+    - full_name: "hive.planejamento.re_silver_receita_cb_paids_air"
+      short_name: "re_silver_receita_cb_paids_air"
+      partition_column: "dt"
+    - full_name: "custom_sql"
+      short_name: "desconto_faseado"
+      partition_column: ""
+      sql_file: "sql/desconto_faseado.sql"
+    - full_name: "custom_sql"
+      short_name: "radar_cohort"
+      partition_column: ""
+      sql_file: "sql/radar_cohort.sql"
+
+gcs:
+  retry_attempts: 3
+  retry_interval_seconds: 30
+
+bigquery:
+  dataset: "planejamento_comercial"
+
+derived_tables:
+  - name: "receita_consolidada"
+    destination: "conect-python-g-sheets.planejamento_comercial.receita_consolidada"
+    order: 1
+    sql_file: "sql/receita_consolidada.sql"
+  - name: "cb_pagamentos"
+    destination: "conect-python-g-sheets.planejamento_comercial.cb_pagamentos"
+    order: 2
+    sql_file: "sql/cb_pagamentos.sql"
+  - name: "receita_enriquecida"
+    destination: "conect-python-g-sheets.planejamento_comercial.receita_enriquecida"
+    order: 3
+    sql_file: "sql/receita_enriquecida.sql"
+  - name: "bd_planos_uf"
+    destination: "conect-python-g-sheets.planejamento_comercial.bd_planos_uf"
+    order: 4
+    sql_file: "sql/bd_planos_uf.sql"
+  - name: "bd_planos_mensais_sva"
+    destination: "conect-python-g-sheets.planejamento_comercial.bd_planos_mensais_sva"
+    order: 5
+    sql_file: "sql/bd_planos_mensais_sva.sql"
+  - name: "planos_periodicos"
+    destination: "conect-python-g-sheets.planejamento_comercial.planos_periodicos"
+    order: 6
+    sql_file: "sql/planos_periodicos.sql"
+  - name: "bd_planos_periodicos"
+    destination: "conect-python-g-sheets.planejamento_comercial.bd_planos_periodicos"
+    order: 7
+    sql_file: "sql/bd_planos_periodicos.sql"
+  - name: "bd_full"
+    destination: "conect-python-g-sheets.planejamento_comercial.bd_full"
+    order: 8
+    sql_file: "sql/bd_full.sql"
+  - name: "diarizacao"
+    destination: "conect-python-g-sheets.planejamento_comercial.diarizacao"
+    order: 9
+    sql_file: "sql/diarizacao.sql"
+  # Operador adiciona novas tabelas derivadas aqui
+
+sheets_export:
+  retry_attempts: 3
+  mappings:
+    - table: "conect-python-g-sheets.planejamento_comercial.re_gold_receita_unificado_air"
+      spreadsheet_id: "1ABC..."
+      sheet_name: "Receita Unificado"
+    - table: "conect-python-g-sheets.planejamento_comercial.receita_consolidada"
+      spreadsheet_id: "1ABC..."
+      sheet_name: "Consolidado"
+    # Operador adiciona novos mapeamentos aqui

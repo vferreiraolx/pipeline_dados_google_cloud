@@ -1,0 +1,1 @@
+print(f"{'Canal':<10} {'Equipe':<25}")

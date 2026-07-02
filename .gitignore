@@ -1,0 +1,13 @@
+.kiro/
+.pytest_cache/
+.venv/
+.vscode/
+__pycache__/
+credenciais.env
+*.csv
+comparar_*.py
+investigar_*.py
+tmp_*.py
+validadador_v2.py
+setup_scheduler.sh
+PLANO_INVESTIGACAO_PP.md
