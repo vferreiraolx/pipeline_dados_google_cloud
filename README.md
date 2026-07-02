@@ -7,7 +7,7 @@ Pipeline que extrai dados do Data Lake (Trino) e gera tabelas automatizadas no B
 ## Como funciona (resumo simples)
 
 ```
-Trino (banco de dados) → BigQuery (armazém na nuvem) → Tabelas calculadas → Google Sheets
+Trino (banco de dados) → GCS → BigQuery (armazém na nuvem) → Tabelas calculadas → Google Sheets
 ```
 
 O pipeline faz 3 coisas:
@@ -17,26 +17,101 @@ O pipeline faz 3 coisas:
 
 ---
 
-## Como rodar
+## Modos de Execução
 
-### Pré-requisitos
-- VPN conectada (obrigatório pra acessar o Trino)
-- Python instalado com as dependências (`pip install -r requirements.txt`)
-- Autenticação GCP configurada (`gcloud auth application-default login`)
+### 1. Cloud Function (principal — produção)
 
-### Rodar o pipeline completo (extração + cálculos)
+Pipeline deployado como Cloud Function com VPC Connector pra acessar o Trino sem VPN.
+
+**URL**: `https://us-east4-conect-python-g-sheets.cloudfunctions.net/pipeline-dados-planejamento`
+
+**Disparar manualmente** (Cloud Shell):
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "https://us-east4-conect-python-g-sheets.cloudfunctions.net/pipeline-dados-planejamento"
 ```
+
+**Ver logs**:
+```bash
+gcloud functions logs read pipeline-dados-planejamento \
+  --region=us-east4 --project=conect-python-g-sheets --limit=20
+```
+
+**Redeploy (após editar config/sql/código)**:
+```bash
+gcloud functions deploy pipeline-dados-planejamento \
+  --gen2 --runtime=python311 --region=us-east4 --source=. \
+  --entry-point=pipeline_handler --trigger-http \
+  --vpc-connector=projects/conect-python-g-sheets/locations/us-east4/connectors/trino-connector \
+  --egress-settings=all --timeout=540s --memory=4Gi \
+  --project=conect-python-g-sheets --quiet
+```
+
+**Adicionar nova tabela**:
+1. Editar `config.yaml` na seção `extraction.tables`
+2. Rodar o comando de redeploy acima
+3. A tabela aparece em `planejamento_comercial.nome_curto` no BigQuery
+
+---
+
+### 2. Pipeline Local (fallback — requer VPN)
+
+Pra quando a cloud não funciona, ou pra testes rápidos.
+
+**Pré-requisitos**:
+- VPN conectada
+- Python com dependências (`pip install -r requirements.txt`)
+- Arquivo `credenciais.env` configurado (ver `credenciais.example.env`)
+- Autenticação GCP (`gcloud auth application-default login`)
+
+**Rodar pipeline completo** (extração + cálculos):
+```bash
 python pipeline_local.py
 ```
 
-### Rodar só os cálculos (sem extrair do Trino)
-```
+**Rodar só os cálculos** (sem extrair do Trino — usa dados já carregados no BQ):
+```bash
 python pipeline_local.py --derivadas
 ```
 
-### Tempo estimado
+**Tempo estimado**:
 - Pipeline completo: ~15 minutos
-- Só derivadas: ~2-5 minutos (exceto bd_full que pode levar ~10-40min)
+- Só derivadas: ~2-5 minutos
+
+---
+
+## Configuração: `config.yaml`
+
+### Adicionar tabela padrão (SELECT * com filtro dt):
+```yaml
+extraction:
+  tables:
+    - full_name: "hive.schema.nome_da_tabela"
+      short_name: "nome_curto"
+      partition_column: "dt"
+```
+
+### Usar MAX(dt) em vez do dia atual:
+```yaml
+      use_max_dt: true
+```
+
+### Query SQL customizada:
+```yaml
+    - full_name: "custom_sql"
+      short_name: "nome_curto"
+      partition_column: ""
+      sql_file: "sql/nome_do_arquivo.sql"
+```
+
+### Adicionar tabela derivada (SQL que roda no BQ):
+```yaml
+derived_tables:
+  - name: "nome_tabela"
+    destination: "conect-python-g-sheets.planejamento_comercial.nome_tabela"
+    order: 10
+    sql_file: "sql/nome_tabela.sql"
+```
 
 ---
 
@@ -44,25 +119,26 @@ python pipeline_local.py --derivadas
 
 ```
 projeto_sheets/
-├── main.py                  # Entry point pra Cloud Run (automação na nuvem)
-├── pipeline_local.py        # Script pra rodar na sua máquina (com VPN)
+├── main.py                  # Entry point da Cloud Function
+├── pipeline_local.py        # Script pra rodar local (com VPN)
 ├── config.yaml              # Configuração: quais tabelas extrair e processar
 ├── requirements.txt         # Dependências Python
-├── credenciais.env          # Credenciais (NÃO compartilhar)
+├── .gcloudignore            # Arquivos excluídos do deploy
+├── .gitignore               # Arquivos excluídos do git
 │
 ├── sql/                     # Queries SQL que geram as tabelas
-│   ├── receita_enriquecida.sql    # Base principal com colunas calculadas
-│   ├── cb_pagamentos.sql          # Tabela de pagamentos CB
-│   ├── bd_full.sql                # Tabela BD FULL (a mais complexa)
-│   ├── bd_planos_uf.sql           # BD por UF
-│   ├── bd_planos_mensais_sva.sql  # BD planos mensais/SVA
-│   ├── bd_planos_periodicos.sql   # BD planos periódicos
-│   ├── diarizacao.sql             # Diarização (pivot diário)
-│   ├── receita_consolidada.sql    # Receita consolidada
-│   ├── desconto_faseado.sql       # Extração desconto faseado (Salesforce)
-│   ├── transferencias.sql         # Lista de transferências de canal
-│   ├── tamanhos_ajustados.sql     # Tamanhos com comparação mês anterior
-│   └── planos_periodicos.sql      # Planos periódicos processados
+│   ├── receita_consolidada.sql
+│   ├── cb_pagamentos.sql
+│   ├── receita_enriquecida.sql
+│   ├── bd_full.sql / bd_full_v2.sql
+│   ├── bd_planos_uf.sql
+│   ├── bd_planos_mensais_sva.sql
+│   ├── bd_planos_periodicos.sql
+│   ├── planos_periodicos.sql
+│   ├── diarizacao.sql
+│   ├── desconto_faseado.sql
+│   ├── radar_cohort.sql
+│   └── transferencias.sql
 │
 ├── src/                     # Código fonte do pipeline
 │   ├── orchestrator.py      # Coordena todo o fluxo
@@ -71,51 +147,42 @@ projeto_sheets/
 │   ├── gcs_uploader.py      # Upload pra Google Cloud Storage
 │   ├── sheets_exporter.py   # Exporta pra Google Sheets
 │   ├── config_manager.py    # Lê e valida o config.yaml
-│   ├── state_manager.py     # Controla estado (primeira carga vs incremental)
+│   ├── state_manager.py     # Controla estado de extração
 │   ├── models.py            # Estruturas de dados
 │   ├── logger.py            # Logs formatados
 │   └── exceptions.py        # Exceções customizadas
 │
 ├── docs/                    # Documentação
+│   ├── DEPLOY_REPORT.md     # Relatório do deploy na cloud
 │   ├── OPERACAO.md          # Guia de operação
-│   ├── RELATORIO_COLUNAS.md # Schema das tabelas BigQuery
-│   ├── SCHEDULER.md         # Sobre agendamento
-│   └── validadores_query/   # Scripts usados pra validar as queries
+│   └── CHANGELOG.md         # Histórico de mudanças
 │
 └── tests/                   # Testes automatizados
 ```
 
 ---
 
-## Troubleshooting (problemas comuns)
+## Troubleshooting
 
-### "Connection timed out" no Trino
-**Causa**: VPN não está conectada.
-**Solução**: Conecte a VPN corporativa e tente novamente.
+### Cloud Function
 
-### "Variáveis AD_USER_NAME ou AD_USER_PASSWORD não definidas"
-**Causa**: O arquivo `credenciais.env` não está configurado.
-**Solução**: Crie o arquivo `credenciais.env` com:
-```
-AD_USER_NAME=seu.usuario
-AD_USER_PASSWORD=sua_senha
-```
+| Problema | Causa | Solução |
+|----------|-------|---------|
+| `upstream request timeout` | Extração demora mais que 540s | Normal pra tabelas grandes. Verifique logs — a extração pode ter completado parcialmente |
+| `Service Unavailable (503)` | Memória insuficiente ou cold start | Verifique logs. Se `Memory limit exceeded`, aumente `--memory` no deploy |
+| `403 Forbidden` | Token expirado ou function requer auth | Use `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)"` |
+| `PERMISSION_DENIED` no deploy | Org Policy bloqueando | Pedir ao time de infra |
 
-### "ERRO bd_full: 400 Unrecognized name"
-**Causa**: A tabela `receita_enriquecida` ainda não foi gerada.
-**Solução**: Rode o pipeline completo (`python pipeline_local.py`) — as tabelas são geradas em ordem.
+### Pipeline Local
 
-### Pipeline demora mais de 40 minutos
-**Causa**: A `bd_full` usa queries complexas que o BigQuery demora pra processar.
-**Solução**: Normal pra primeira execução. Se travar, cancele o job no Console BigQuery e rode `--derivadas` novamente.
-
-### "Tabela X retornou 0 linhas"
-**Causa**: O snapshot do dia não está disponível no Trino.
-**Solução**: Verifique se a tabela tem dados com `MAX(dt)`. O `re_silver_planos_periodicos_cb` usa `use_max_dt: true` justamente por isso.
-
-### Valores divergem do Sheets
-**Causa**: O Sheets recalcula com um snapshot diferente do BigQuery.
-**Solução**: Re-rode o pipeline. Se a diferença for <1%, é esperado (timing de snapshot). Se for >5%, verifique a lógica da query.
+| Problema | Causa | Solução |
+|----------|-------|---------|
+| `Connection timed out` no Trino | VPN não conectada | Conecte a VPN e tente novamente |
+| `AD_USER_NAME não definidas` | `credenciais.env` não configurado | Crie baseado no `credenciais.example.env` |
+| `ERRO bd_full: Unrecognized name` | Tabelas anteriores não geradas | Rode pipeline completo (tabelas são geradas em ordem) |
+| Pipeline demora >40 min | Normal pra bd_full na primeira vez | Aguarde ou rode `--derivadas` se dados já estão no BQ |
+| Valores divergem do Sheets (<1%) | Snapshot timing (PP atualizado diariamente) | Esperado — re-rode se necessário |
+| Valores divergem do Sheets (>5%) | Bug na query SQL | Verifique a lógica da query vs fórmulas do Sheets |
 
 ---
 
@@ -135,8 +202,11 @@ AD_USER_PASSWORD=sua_senha
 
 ---
 
-## Quem mantém isso
+## Infra
 
-- **Extração manual**: Alguém do time roda `python pipeline_local.py` com VPN
-- **Futuro (automação)**: Cloud Run + VPC Connector (em andamento com infra)
-- **Queries derivadas**: Podem ser agendadas via BigQuery Scheduled Queries
+- **Projeto GCP**: `conect-python-g-sheets`
+- **Dataset BigQuery**: `planejamento_comercial`
+- **Bucket GCS**: `gs://teste-extracao-trino/`
+- **Região**: `us-east4`
+- **VPC Connector**: `trino-connector`
+- **Trino Host**: `trino-gateway.dataeng.bigdata.olxbr.io:443`
