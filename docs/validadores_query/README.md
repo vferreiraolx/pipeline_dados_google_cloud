@@ -13,7 +13,7 @@ Scripts Python usados para validar as tabelas geradas pelo pipeline contra os CS
 - `validar_receita_enriquecida.py` — Compara totais de faturado/pago por mês
 - `validar_diarizacao.py` — Compara pivot diário NOVO/CHURN/UP/DOWN
 - `validar_bd_full.py` — Compara contagens e valores por Canal/Mês
-- `validar_trino_snapshot.py` — Confirma snapshot via Trino (precisa VPN)
+- `validar_trino_snapshot.py` — Script legado de validação de snapshot
 
 ## Resultado esperado
 

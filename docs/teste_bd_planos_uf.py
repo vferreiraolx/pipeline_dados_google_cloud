@@ -4,8 +4,6 @@ import db-dtypes# tenho a menor ideia, mas segundo pesquisa o método .to_datafr
 import gspread # isso fara a conexão com a planilha: O wrapper que vai facilitar a leitura da planilh
 import google-auth-oauthlib
 import os
-from dotenv import load_dotenv()
-load_dotenv("projeto_meu/credenciais.env")
 
 def extrair_bigquery():
     pass

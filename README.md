@@ -21,7 +21,7 @@ O pipeline faz 3 coisas:
 
 ### 1. Cloud Function (principal — produção)
 
-Pipeline deployado como Cloud Function com VPC Connector pra acessar o Trino sem VPN.
+Pipeline deployado como Cloud Function com VPC Connector para acessar o Trino sem depender de VPN.
 
 **URL**: `https://us-east4-conect-python-g-sheets.cloudfunctions.net/pipeline-dados-planejamento`
 
@@ -54,14 +54,13 @@ gcloud functions deploy pipeline-dados-planejamento \
 
 ---
 
-### 2. Pipeline Local (fallback — requer VPN)
+### 2. Pipeline Local (legado — só para cenários especiais)
 
 Pra quando a cloud não funciona, ou pra testes rápidos.
 
 **Pré-requisitos**:
-- VPN conectada
 - Python com dependências (`pip install -r requirements.txt`)
-- Arquivo `credenciais.env` configurado (ver `credenciais.example.env`)
+- Variáveis de ambiente `TRINO_USER` e `TRINO_PASSWORD` definidas
 - Autenticação GCP (`gcloud auth application-default login`)
 
 **Rodar pipeline completo** (extração + cálculos):
@@ -120,7 +119,7 @@ derived_tables:
 ```
 projeto_sheets/
 ├── main.py                  # Entry point da Cloud Function
-├── pipeline_local.py        # Script pra rodar local (com VPN)
+├── pipeline_local.py        # Script legado pra rodar local
 ├── config.yaml              # Configuração: quais tabelas extrair e processar
 ├── requirements.txt         # Dependências Python
 ├── .gcloudignore            # Arquivos excluídos do deploy
@@ -177,8 +176,8 @@ projeto_sheets/
 
 | Problema | Causa | Solução |
 |----------|-------|---------|
-| `Connection timed out` no Trino | VPN não conectada | Conecte a VPN e tente novamente |
-| `AD_USER_NAME não definidas` | `credenciais.env` não configurado | Crie baseado no `credenciais.example.env` |
+| `Connection timed out` no Trino | Gateway indisponível | Use a Cloud Function com VPC |
+| `TRINO_USER não definidas` | Variáveis de ambiente ausentes | Exporte `TRINO_USER` e `TRINO_PASSWORD` no shell antes de executar |
 | `ERRO bd_full: Unrecognized name` | Tabelas anteriores não geradas | Rode pipeline completo (tabelas são geradas em ordem) |
 | Pipeline demora >40 min | Normal pra bd_full na primeira vez | Aguarde ou rode `--derivadas` se dados já estão no BQ |
 | Valores divergem do Sheets (<1%) | Snapshot timing (PP atualizado diariamente) | Esperado — re-rode se necessário |

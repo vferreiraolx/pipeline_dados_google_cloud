@@ -20,8 +20,7 @@ class BigQueryLoader:
     Responsável por:
     - Carga completa (full): cria tabela se não existe e substitui conteúdo
       com WRITE_TRUNCATE.
-    - Carga incremental: deduplicação por coluna de partição (DELETE registros
-      com mesmo valor de dt, depois INSERT novos registros).
+    - Carga incremental: substitui o snapshot atual da tabela com WRITE_TRUNCATE.
     - Execução de tabelas derivadas via SQL com WRITE_TRUNCATE.
     - Tratamento de falhas por tabela: registra erro e não lança exceção,
       permitindo que o orchestrator continue com as próximas tabelas.
@@ -95,12 +94,11 @@ class BigQueryLoader:
     def load_incremental(
         self, gcs_uri: str, table_id: str, partition_column: str = "dt"
     ) -> None:
-        """Carga incremental: deduplicação por coluna de partição (DELETE + INSERT).
+        """Carga incremental: substitui o snapshot da tabela com WRITE_TRUNCATE.
 
         Estratégia:
         1. Extrai a data do nome do arquivo no gcs_uri (padrão: tabela_YYYY-MM-DD.csv)
-        2. Executa DELETE FROM tabela WHERE partition_column = 'data'
-        3. Carrega o CSV com WRITE_APPEND
+        2. Substitui a tabela destino inteira com o CSV carregado
 
         Args:
             gcs_uri: URI do arquivo no GCS (ex: gs://bucket/table/table_2024-01-15.csv).
@@ -132,28 +130,12 @@ class BigQueryLoader:
                 )
                 return
 
-            # Passo 1: DELETE registros existentes com a mesma data de partição
-            delete_query = (
-                f"DELETE FROM `{table_id}` "
-                f"WHERE {partition_column} = '{partition_date}'"
-            )
-
-            logger.info(
-                "[CARGA_BQ] [DEDUPLICAÇÃO] Tabela: %s | "
-                "Removendo registros com %s = '%s'",
-                table_id,
-                partition_column,
-                partition_date,
-            )
-
-            query_job = self._client.query(delete_query)
-            query_job.result()  # Aguarda conclusão do DELETE
-
-            # Passo 2: Carregar novos dados com WRITE_APPEND
+            # Carga de snapshot: substitui o conteúdo inteiro para evitar
+            # divergência de schema entre execuções.
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.CSV,
                 autodetect=True,
-                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
                 skip_leading_rows=1,
             )
 
@@ -168,7 +150,7 @@ class BigQueryLoader:
             table = self._client.get_table(table_id)
             logger.info(
                 "[CARGA_BQ] [SUCESSO] Tabela: %s | Registros: %d | "
-                "Carga incremental concluída (dt='%s')",
+                "Carga incremental concluída (snapshot dt='%s')",
                 table_id,
                 table.num_rows,
                 partition_date,

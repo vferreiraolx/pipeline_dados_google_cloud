@@ -4,6 +4,53 @@ Registro dos ajustes feitos no código durante a fase de validação e otimizaç
 
 ---
 
+## 2026-07-02 — VPC Connector & Eliminação de VPN
+
+### 1. Cloud Function `pipeline-dados-planejamento` — Deploy com VPC (PRODUÇÃO)
+
+**Status**: ✅ ATIVO | Revisão: `pipeline-dados-planejamento-00008-vux`
+
+**O que foi feito**:
+- Deploy da Cloud Function Gen2 com VPC Connector `trino-connector` (us-east4)
+- Egress settings: `ALL_TRAFFIC` — todo tráfego passa pelo VPC, sem necessidade de VPN
+- Autenticação: variáveis `TRINO_USER` / `TRINO_PASSWORD` configuradas como env vars na função
+- Validado: extração e carga de 844.994 registros de `re_gold_receita_unificado_air` → BigQuery
+
+**Arquitetura do pipeline em produção**:
+```
+Cloud Scheduler → Cloud Function (VPC Connector) → Trino Gateway → GCS → BigQuery
+```
+
+---
+
+### 2. `src/bigquery_loader.py` — Estratégia de carga snapshot
+
+**Problema**: Carga incremental (`DELETE + WRITE_APPEND`) falhava com schema mismatch — coluna `vigencia_bt` mudou de `INTEGER` para `STRING` no Trino.
+
+**Correção**: `load_incremental()` trocado para `WRITE_TRUNCATE` (snapshot completo por execução). Sem `DELETE` prévio.
+
+**Testes**: 21/21 passando (atualizados para refletir estratégia snapshot).
+
+---
+
+### 3. Purga completa de VPN — Código e Documentação
+
+**Problema**: Dependências e referências a VPN distribuídas em múltiplos arquivos.
+
+**Arquivos atualizados**:
+- `pipeline_local.py` — removido `credenciais.env`, `AD_USER_NAME`/`AD_USER_PASSWORD` → `TRINO_USER`/`TRINO_PASSWORD`; docstring atualizada para "LEGADO, sem VPN"
+- `credenciais.example.env` — atualizado para `TRINO_USER`/`TRINO_PASSWORD`; instrução de uso correta
+- `README.md` — pipeline local: removido requisito `credenciais.env`; troubleshooting atualizado
+- `docs/CHANGELOG.md` — pendência VPC marcada como concluída ✅
+- `docs/OPERACAO.md` — sem referências a VPN; usa `TRINO_USER`/`TRINO_PASSWORD`
+- `docs/pipeline_overview.html` — VPN removida como requisito; status VPC atualizado
+- `docs/validadores_query/README.md` — `validar_trino_snapshot.py` marcado como legado
+- `tests/unit/test_trino_extractor.py` — corrigido teste para `DATE 'YYYY-MM-DD'` (literal SQL tipado)
+
+**Suíte de testes**: **95/95 passando**.
+
+---
+
 ## 2026-06-29 — Sessão de hoje
 
 ### 1. `cb_pagamentos.sql` — Correção `id_migracao_pro_field`
@@ -142,4 +189,4 @@ INNER JOIN advertisers_re re ON od.advertiser_id = re.advertiser_id
 1. Rodar pipeline com `radar_cohort` e revalidar volume_transcorrido
 2. Substituir `bd_full.sql` pela `bd_full_v2.sql` após validação final
 3. Investigar divergência Online (-6.2% # Novos) — provável mismatch na CTE pp_equipe
-4. Aguardar VPC Connector da infra pra deploy em Cloud Run
+4. ~~Aguardar VPC Connector da infra pra deploy em Cloud Run~~ ✅ **VPC Connector `trino-connector` deployado em us-east4. Cloud Function `pipeline-dados-planejamento` em produção — sem necessidade de VPN.**

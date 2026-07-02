@@ -195,10 +195,10 @@ class TestTrinoExtractorExtracao:
             )
 
             assert total == 1
-            # Verifica que a query contém filtro pela data atual
+            # Verifica que a query contém filtro pela data atual com DATE literal (tipo date)
             executed_query = mock_cursor.execute.call_args[0][0]
             data_hoje = date.today().strftime("%Y-%m-%d")
-            assert f"dt = '{data_hoje}'" in executed_query
+            assert f"DATE '{data_hoje}'" in executed_query
 
     @patch("src.trino_extractor.trino_connect")
     def test_extract_full_sem_conexao_raises_runtime_error(self, mock_connect):

@@ -1,13 +1,23 @@
 """
 Pipeline Local — Trino → Parquet (chunks) → GCS → BigQuery
-Executa com VPN conectada: python pipeline_local.py
+
+LEGADO: Este script foi substituído pela Cloud Function `pipeline-dados-planejamento`
+com VPC Connector. Use-o apenas em cenários especiais (debug local, testes pontuais).
+
+Pré-requisitos:
+  - TRINO_USER e TRINO_PASSWORD definidos no ambiente (sem VPN — o Trino Gateway é público)
+  - Credenciais GCP: gcloud auth application-default login
+
+Execução:
+  python pipeline_local.py              # pipeline completo
+  python pipeline_local.py --derivadas  # só tabelas derivadas (sem Trino)
 """
 
 import os
 import sys
 import time
 import logging
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -16,14 +26,10 @@ import pyarrow.parquet as pq
 from trino.dbapi import connect
 from trino.auth import BasicAuthentication
 from google.cloud import storage, bigquery
-from dotenv import load_dotenv
 
 # ============================================================
 # Configuração
 # ============================================================
-
-load_dotenv("credenciais.env")
-load_dotenv("projeto_meu/credenciais.env")
 
 PROJECT_ID = "conect-python-g-sheets"
 BUCKET_NAME = "teste-extracao-trino"
@@ -31,8 +37,8 @@ DATASET = "planejamento_comercial"
 
 TRINO_HOST = "trino-gateway.dataeng.bigdata.olxbr.io"
 TRINO_PORT = 443
-TRINO_USER = os.getenv("AD_USER_NAME", "")
-TRINO_PASS = os.getenv("AD_USER_PASSWORD", "")
+TRINO_USER = os.getenv("TRINO_USER", "")
+TRINO_PASS = os.getenv("TRINO_PASSWORD", "")
 
 TABELAS = [
     {
@@ -109,7 +115,7 @@ logger = logging.getLogger(__name__)
 
 def conectar_trino():
     if not TRINO_USER or not TRINO_PASS:
-        logger.error("Variáveis AD_USER_NAME ou AD_USER_PASSWORD não definidas!")
+        logger.error("Variáveis TRINO_USER ou TRINO_PASSWORD não definidas!")
         sys.exit(1)
 
     logger.info(f"Conectando ao Trino: {TRINO_HOST}:{TRINO_PORT}")
@@ -284,8 +290,8 @@ def main():
     try:
         conn = conectar_trino()
     except Exception as e:
-        logger.error(f"FALHA TRINO: {e}")
-        logger.error("VPN ligada? Credenciais corretas?")
+        logger.error("FALHA TRINO: %s", e)
+        logger.error("Verifique TRINO_USER e TRINO_PASSWORD no ambiente.")
         sys.exit(1)
 
     try:

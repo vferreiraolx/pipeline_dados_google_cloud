@@ -83,7 +83,7 @@
         <div class="desc">Banco de dados interno da OLX com todos os dados de receita, contratos e pagamentos.</div>
         <div class="tech">hive.planejamento.re_gold_receita_unificado_air, hive.planejamento.re_silver_planos_periodicos_cb, hive.planejamento.re_silver_receita_cb_paids_air</div>
     </div>
-    <div class="flow-arrow">↓ <span class="tag tag-manual">Requer VPN</span></div>
+    <div class="flow-arrow">↓ <span class="tag tag-auto">Cloud VPC</span></div>
 
     <div class="flow-step process">
         <div class="label">2. Extração (Python)</div>
@@ -133,14 +133,14 @@
 <div class="flow">
     <div class="flow-step blocked">
         <div class="label">⏳ Pendente: VPC Connector</div>
-        <div class="desc">A automação completa (rodar sem intervenção humana) depende de um "túnel de rede" que o time de infraestrutura está configurando. Sem ele, a extração precisa ser feita manualmente com VPN.</div>
-        <div class="tech">Em fase de implementação</div>
+        <div class="desc">A automação completa roda na Cloud Function com VPC Connector, sem depender de VPN corporativa.</div>
+        <div class="tech">Cloud Function Gen2 + VPC Connector</div>
     </div>
 </div>
 
 <table>
     <tr><th>Etapa</th><th>Hoje</th><th>Após VPC</th></tr>
-    <tr><td>Extração (Trino → BQ)</td><td><span class="tag tag-manual">Manual (VPN)</span></td><td><span class="tag tag-auto">Automático</span></td></tr>
+    <tr><td>Extração (Trino → BQ)</td><td><span class="tag tag-auto">Automático (VPC)</span></td><td><span class="tag tag-auto">Automático</span></td></tr>
     <tr><td>Transformações (SQL)</td><td><span class="tag tag-auto">Automático</span></td><td><span class="tag tag-auto">Automático</span></td></tr>
     <tr><td>Disponibilização (Sheets)</td><td><span class="tag tag-auto">Automático</span></td><td><span class="tag tag-auto">Automático</span></td></tr>
 </table>
@@ -178,10 +178,10 @@
 
 <div class="card card-blue">
     <h3>Dependências de Rede</h3>
-    <p>O Trino Gateway (<code>trino-gateway.dataeng.bigdata.olxbr.io:443</code>) está em rede privada. Acesso requer VPN corporativa ou VPC Connector (em configuração).</p>
+    <p>O Trino Gateway (<code>trino-gateway.dataeng.bigdata.olxbr.io:443</code>) está em rede privada. O acesso de produção é feito pela Cloud Function com VPC Connector.</p>
     <table>
-        <tr><th>Componente</th><th>Necessita VPN?</th><th>Solução Cloud</th></tr>
-        <tr><td>Extração Trino → BQ</td><td>Sim</td><td>VPC Connector (pendente infra)</td></tr>
+        <tr><th>Componente</th><th>Precisa VPN?</th><th>Solução Cloud</th></tr>
+        <tr><td>Extração Trino → BQ</td><td>Não</td><td>VPC Connector</td></tr>
         <tr><td>Tabelas derivadas (SQL)</td><td>Não</td><td>Já funciona 100% na cloud</td></tr>
         <tr><td>Export pra Sheets</td><td>Não</td><td>Connected Sheets (nativo)</td></tr>
     </table>
@@ -192,9 +192,9 @@
 <table>
     <tr><th>#</th><th>Ação</th><th>Dependência</th><th>Status</th></tr>
     <tr><td>1</td><td>Infra libera VPC Connector (/28)</td><td>Time de infra</td><td class="status-ok">✅ Pronto</td></tr>
-    <tr><td>2</td><td>Deploy Cloud Function com --vpc-connector</td><td>Passo 1</td><td class="status-wait">⚠️ Em análise</td></tr>
+    <tr><td>2</td><td>Deploy Cloud Function com --vpc-connector</td><td>Passo 1</td><td class="status-ok">✅ Pronto</td></tr>
     <tr><td>3</td><td>Configurar Cloud Scheduler (cron diário 7h)</td><td>Passo 2</td><td class="status-wait">⚠️ Em análise</td></tr>
-    <tr><td>4</td><td>Validação final em produção</td><td>Passo 3</td><td class="status-block">Bloqueado</td></tr>
+    <tr><td>4</td><td>Validação final em produção</td><td>Passo 3</td><td class="status-wait">⚠️ Em análise</td></tr>
     <tr><td>5</td><td>Substituir bd_full.sql pela v2 otimizada</td><td>Nenhuma</td><td class="status-ok">✅ Pronto</td></tr>
     <tr><td>6</td><td>Refinar divergência Online (-6.2% # Novos)</td><td>Nenhuma</td><td class="status-wait">⚠️ Em análise</td></tr>
 </table>

@@ -59,7 +59,7 @@ extraction:
 ### O que acontece após adicionar
 
 - Na **primeira execução**, o pipeline fará uma extração completa (todos os registros da tabela)
-- Nas **execuções seguintes**, fará extração incremental (somente a partição `dt` do dia atual)
+- Nas **execuções seguintes**, a Cloud Function com VPC fará a atualização do snapshot no BigQuery
 - O arquivo será salvo no GCS como `re_silver_metas_comerciais/re_silver_metas_comerciais_YYYY-MM-DD.csv`
 - Uma tabela BigQuery será criada automaticamente em `conect-python-g-sheets.planejamento_comercial.re_silver_metas_comerciais`
 

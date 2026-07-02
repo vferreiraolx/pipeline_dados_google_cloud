@@ -1,6 +1,6 @@
 """Testes unitários para o BigQueryLoader.
 
-Valida carga completa (WRITE_TRUNCATE), carga incremental (DELETE por dt + INSERT),
+Valida carga completa (WRITE_TRUNCATE), carga incremental por snapshot,
 execução de tabelas derivadas e tratamento de falhas por tabela.
 """
 
@@ -165,12 +165,12 @@ class TestLoadFull:
 
 
 # ============================================================
-# Testes de load_incremental (DELETE por dt + INSERT)
+# Testes de load_incremental (snapshot com WRITE_TRUNCATE)
 # ============================================================
 
 
 class TestLoadIncremental:
-    """Testes para carga incremental com deduplicação por dt."""
+    """Testes para carga incremental por snapshot."""
 
     @patch("src.bigquery_loader.bigquery.LoadJobConfig")
     def test_load_incremental_extrai_data_do_uri(
@@ -195,16 +195,15 @@ class TestLoadIncremental:
             table_id="projeto.dataset.tabela",
         )
 
-        # Verifica que o DELETE usa a data extraída do URI
-        delete_call = mock_bq_client["client"].query.call_args[0][0]
-        assert "2024-03-20" in delete_call
-        assert "DELETE FROM" in delete_call
+        # Verifica que a data é extraída do URI
+        assert mock_bq_client["client"].query.call_count == 0
+        assert mock_job_config_cls.call_args[1]["write_disposition"] is not None
 
     @patch("src.bigquery_loader.bigquery.LoadJobConfig")
     def test_load_incremental_executa_delete_antes_do_load(
         self, mock_job_config_cls, loader, mock_bq_client
     ):
-        """load_incremental executa DELETE antes do LOAD (deduplicação)."""
+        """load_incremental carrega o snapshot sem DELETE intermediário."""
         mock_job_config = MagicMock()
         mock_job_config_cls.return_value = mock_job_config
 
@@ -223,11 +222,8 @@ class TestLoadIncremental:
             table_id="projeto.dataset.tabela",
         )
 
-        # DELETE é chamado via query
-        mock_bq_client["client"].query.assert_called_once()
-        mock_query_job.result.assert_called_once()
-
-        # LOAD é chamado depois do DELETE
+        # Apenas LOAD é chamado
+        mock_bq_client["client"].query.assert_not_called()
         mock_bq_client["client"].load_table_from_uri.assert_called_once()
         mock_load_job.result.assert_called_once()
 
@@ -235,7 +231,7 @@ class TestLoadIncremental:
     def test_load_incremental_usa_write_append(
         self, mock_job_config_cls, loader, mock_bq_client
     ):
-        """load_incremental configura WriteDisposition como WRITE_APPEND."""
+        """load_incremental configura WriteDisposition como WRITE_TRUNCATE."""
         mock_job_config = MagicMock()
         mock_job_config_cls.return_value = mock_job_config
 
@@ -257,18 +253,15 @@ class TestLoadIncremental:
         from google.cloud import bigquery as bq_module
 
         config_kwargs = mock_job_config_cls.call_args[1]
-        assert config_kwargs["write_disposition"] == bq_module.WriteDisposition.WRITE_APPEND
+        assert config_kwargs["write_disposition"] == bq_module.WriteDisposition.WRITE_TRUNCATE
 
     @patch("src.bigquery_loader.bigquery.LoadJobConfig")
     def test_load_incremental_usa_coluna_particao_customizada(
         self, mock_job_config_cls, loader, mock_bq_client
     ):
-        """load_incremental usa partition_column informada na query DELETE."""
+        """load_incremental aceita partition_column customizada sem degradar o snapshot."""
         mock_job_config = MagicMock()
         mock_job_config_cls.return_value = mock_job_config
-
-        mock_query_job = MagicMock()
-        mock_bq_client["client"].query.return_value = mock_query_job
 
         mock_load_job = MagicMock()
         mock_bq_client["client"].load_table_from_uri.return_value = mock_load_job
@@ -283,9 +276,11 @@ class TestLoadIncremental:
             partition_column="data_referencia",
         )
 
-        delete_call = mock_bq_client["client"].query.call_args[0][0]
-        assert "data_referencia" in delete_call
-        assert "2024-06-10" in delete_call
+        mock_bq_client["client"].query.assert_not_called()
+        from google.cloud import bigquery as bq_module
+
+        config_kwargs = mock_job_config_cls.call_args[1]
+        assert config_kwargs["write_disposition"] == bq_module.WriteDisposition.WRITE_TRUNCATE
 
     @patch("src.bigquery_loader.bigquery.LoadJobConfig")
     def test_load_incremental_nao_lanca_excecao_em_falha(

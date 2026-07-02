@@ -1,13 +1,8 @@
 """
-Validador: Confirma snapshot do Trino vs BigQuery.
-Verifica se o BQ tem o mesmo snapshot que o Trino (confirma sincronização).
+Validador legado de snapshot.
 
-Uso (precisa VPN):
-    python docs/validadores_query/validar_trino_snapshot.py
-
-Requer:
-    - VPN conectada
-    - Dependências do trino_connector instaladas
+O caminho suportado para atualização do BQ é o Cloud Function com VPC.
+Este script permanece apenas para inspeções manuais em ambientes legados.
 """
 import os, sys
 sys.path.insert(0, r'C:\Users\vinicius.foreste\Desktop\Oswaldo_novo\trino_connector\src')
