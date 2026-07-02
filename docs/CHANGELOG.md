@@ -33,7 +33,21 @@ Cloud Scheduler → Cloud Function (VPC Connector) → Trino Gateway → GCS →
 
 ---
 
-### 3. Purga completa de VPN — Código e Documentação
+### 3. Validação end-to-end sem VPN — PROVA DOCUMENTADA
+
+**Teste executado com VPN corporativa desligada:**
+
+| Campo | Evidência |
+|-------|-----------|
+| Execution ID | `bkCES3cqjsMr` |
+| Invocado em | 2026-07-02T22:48:24 UTC (VPN OFF) |
+| Conexão Trino | `[CONEXÃO] [SUCESSO]` — 22:48:26 UTC |
+| Extração | `[EXTRAÇÃO] [SUCESSO]` — **845.840 rows** — 22:49:03 UTC |
+| Mecanismo | VPC Connector `trino-connector` us-east4 · ALL_TRAFFIC |
+
+---
+
+### 4. Purga completa de VPN — Código e Documentação
 
 **Problema**: Dependências e referências a VPN distribuídas em múltiplos arquivos.
 

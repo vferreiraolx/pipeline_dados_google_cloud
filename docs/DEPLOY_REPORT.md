@@ -7,13 +7,30 @@
 
 ---
 
-## Status Final: FUNCIONAL ✅
+## Status Final: FUNCIONAL ✅ — Validado sem VPN (02/07/2026)
 
 O pipeline está rodando end-to-end na cloud:
 - Conexão com Trino via VPC Connector
-- Extração de dados (844.994 registros na primeira tabela)
+- Extração de dados (845.840 registros na primeira tabela)
 - Upload pro GCS (`gs://teste-extracao-trino/`)
 - Carga no BigQuery (`planejamento_comercial`)
+
+---
+
+## Prova de Funcionamento sem VPN
+
+**Teste realizado em 02/07/2026 às 22:48 UTC com VPN corporativa desligada.**
+
+| Campo | Valor |
+|-------|-------|
+| Execution ID | `bkCES3cqjsMr` |
+| VPN status | **DESLIGADA** |
+| 22:48:26 UTC | `[CONEXÃO] [SUCESSO]` — Trino estabelecida via VPC |
+| 22:48:28 UTC | `[EXTRAÇÃO] [INICIO]` — re_gold_receita_unificado_air |
+| 22:49:03 UTC | `[EXTRAÇÃO] [SUCESSO]` — **845.840 registros** |
+| 22:49:03 UTC | `[UPLOAD_GCS] [INICIO]` → `gs://teste-extracao-trino/...` |
+
+O VPC Connector `trino-connector` (us-east4) roteia o tráfego pela rede interna do GCP diretamente ao gateway Trino da OLX, sem necessidade de túnel VPN.
 
 ---
 

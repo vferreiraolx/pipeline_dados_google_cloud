@@ -23,6 +23,9 @@ O pipeline faz 3 coisas:
 
 Pipeline deployado como Cloud Function com VPC Connector para acessar o Trino sem depender de VPN.
 
+> **✅ Validado sem VPN em 02/07/2026** — Execution ID `bkCES3cqjsMr`, VPN desligada, 845.840 rows
+> extraídos com sucesso via VPC Connector `trino-connector` (us-east4). Ver `docs/DEPLOY_REPORT.md`.
+
 **URL**: `https://us-east4-conect-python-g-sheets.cloudfunctions.net/pipeline-dados-planejamento`
 
 **Disparar manualmente** (Cloud Shell):
