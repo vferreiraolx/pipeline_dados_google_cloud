@@ -26,6 +26,11 @@ class SourceTableConfig:
         partition_column: Coluna de particionamento utilizada para extração incremental.
         sql_file: Caminho do arquivo SQL para extrações customizadas (opcional).
         use_max_dt: Se True, usa MAX(dt) ao invés de data atual (opcional).
+        group: Grupo de cadência da tabela — "hourly" (gold, incremental rápido)
+            ou "daily" (silver, extração completa). Use "all" para sem filtro.
+        always_full: Se True, sempre faz extração completa independente do
+            estado (necessário para tabelas históricas onde dt não é snapshot
+            do dia atual, como re_silver_receita_cb_air).
     """
 
     full_name: str
@@ -33,6 +38,8 @@ class SourceTableConfig:
     partition_column: str
     sql_file: Optional[str] = None
     use_max_dt: bool = False
+    group: str = "all"
+    always_full: bool = False
 
 
 @dataclass

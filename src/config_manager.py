@@ -275,23 +275,32 @@ class ConfigManager:
                     f"{fields_str}. Adicione esses campos ao mapeamento."
                 )
 
-    def get_source_tables(self) -> list[SourceTableConfig]:
-        """Retorna lista de tabelas-fonte configuradas.
+    def get_source_tables(self, group: str = "all") -> list[SourceTableConfig]:
+        """Retorna lista de tabelas-fonte configuradas, filtradas por grupo de cadência.
+
+        Args:
+            group: Grupo de cadência para filtrar — "hourly", "daily" ou "all".
+                "all" retorna todas as tabelas (comportamento padrão/legado).
 
         Returns:
             Lista de SourceTableConfig com as tabelas para extração.
         """
         tables = self._config["extraction"]["tables"]
-        return [
+        configs = [
             SourceTableConfig(
                 full_name=t["full_name"],
                 short_name=t["short_name"],
                 partition_column=t.get("partition_column", ""),
                 sql_file=t.get("sql_file"),
                 use_max_dt=t.get("use_max_dt", False),
+                group=t.get("group", "all"),
+                always_full=t.get("always_full", False),
             )
             for t in tables
         ]
+        if group == "all":
+            return configs
+        return [t for t in configs if t.group == group]
 
     def get_derived_tables(self) -> list[DerivedTableConfig]:
         """Retorna tabelas derivadas ordenadas por ordem de execução.

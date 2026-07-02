@@ -44,9 +44,13 @@ def pipeline_handler(request):
         )
         config = ConfigManager(config_path)
 
+        # Determinar grupo de execução: "hourly" | "daily" | "all"
+        group = request.args.get("group", "all")
+
         # Instanciar e executar o pipeline
         orchestrator = Orchestrator(config)
-        report = orchestrator.run()
+        report = orchestrator.run(group=group)
+        report["group"] = group
 
         return (json.dumps(report, ensure_ascii=False), 200, headers)
 

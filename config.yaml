@@ -17,24 +17,33 @@ extraction:
     - full_name: "hive.planejamento.re_gold_receita_unificado_air"
       short_name: "re_gold_receita_unificado_air"
       partition_column: "dt"
+      group: "hourly"
     - full_name: "hive.planejamento.re_silver_receita_cb_air"
       short_name: "re_silver_receita_cb_air"
       partition_column: "dt"
+      group: "daily"
+      always_full: true
     - full_name: "hive.planejamento.re_silver_planos_periodicos_cb"
       short_name: "re_silver_planos_periodicos_cb"
       partition_column: "dt"
       use_max_dt: true
+      group: "daily"
+      always_full: true
     - full_name: "hive.planejamento.re_silver_receita_cb_paids_air"
       short_name: "re_silver_receita_cb_paids_air"
       partition_column: "dt"
+      group: "daily"
+      always_full: true
     - full_name: "custom_sql"
       short_name: "desconto_faseado"
       partition_column: ""
       sql_file: "sql/desconto_faseado.sql"
+      group: "daily"
     - full_name: "custom_sql"
       short_name: "radar_cohort"
       partition_column: ""
       sql_file: "sql/radar_cohort.sql"
+      group: "daily"
 
 gcs:
   retry_attempts: 3

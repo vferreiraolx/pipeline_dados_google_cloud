@@ -52,12 +52,12 @@ class Orchestrator:
         self.config = config
         self._logger = setup_logger("orchestrator")
 
-    def run(self) -> dict:
+    def run(self, group: str = "all") -> dict:
         """Executa o pipeline completo e retorna relatório de execução.
 
         Fluxo:
             1. Conectar ao Trino (abort se falhar após retries).
-            2. Para cada tabela-fonte:
+            2. Para cada tabela-fonte do grupo solicitado:
                a. Verificar estado (first_load ou incremental).
                b. Extrair dados (full ou incremental).
                c. Upload para GCS.
@@ -67,6 +67,10 @@ class Orchestrator:
             4. Executar tabelas derivadas em ordem.
             5. Exportar para Google Sheets.
             6. Retornar relatório.
+
+        Args:
+            group: Grupo de cadência — "hourly" (só gold), "daily" (só silver)
+                ou "all" (todas as tabelas, comportamento legado).
 
         Returns:
             Dicionário com relatório de execução contendo:
@@ -120,7 +124,7 @@ class Orchestrator:
 
         # --- Etapas 2-4: Extração, Upload GCS, Carga BigQuery ---
         try:
-            self._process_source_tables(trino, report)
+            self._process_source_tables(trino, report, group)
         finally:
             # Sempre fechar conexão Trino
             trino.close()
@@ -141,11 +145,11 @@ class Orchestrator:
 
         return report
 
-    def _process_source_tables(self, trino: TrinoExtractor, report: dict) -> None:
-        """Processa todas as tabelas-fonte: extração, upload e carga.
+    def _process_source_tables(self, trino: TrinoExtractor, report: dict, group: str = "all") -> None:
+        """Processa todas as tabelas-fonte do grupo: extração, upload e carga.
 
-        Para cada tabela configurada:
-        - Verifica se é primeira carga ou incremental.
+        Para cada tabela configurada no grupo:
+        - Verifica se é primeira carga ou incremental (respeitando always_full).
         - Extrai dados via Trino.
         - Faz upload para GCS.
         - Carrega no BigQuery.
@@ -157,8 +161,9 @@ class Orchestrator:
         Args:
             trino: Instância do TrinoExtractor com conexão ativa.
             report: Dicionário de relatório para atualização.
+            group: Grupo de cadência — filtra as tabelas a processar.
         """
-        source_tables = self.config.get_source_tables()
+        source_tables = self.config.get_source_tables(group=group)
         state_manager = StateManager(project=self.config.project_id)
         gcs_uploader = GCSUploader(
             project=self.config.project_id,
@@ -207,7 +212,7 @@ class Orchestrator:
                         custom_query = f.read()
                     rows = trino.extract_custom(custom_query, local_path)
                     extraction_type = "full"
-                elif is_first or table_cfg.use_max_dt:
+                elif is_first or table_cfg.use_max_dt or table_cfg.always_full:
                     rows = trino.extract_full(full_name, local_path)
                     extraction_type = "full"
                 else:
