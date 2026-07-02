@@ -56,7 +56,7 @@ gcloud functions deploy "${FUNCTION_NAME}" \
     --vpc-connector="${VPC_CONNECTOR}" \
     --egress-settings=all \
     --timeout=3600s \
-    --memory=4Gi \
+    --memory=8Gi \
     --max-instances=1 \
     --set-env-vars="TRINO_USER=${TRINO_USER},TRINO_PASSWORD=${TRINO_PASSWORD}" \
     --source=.
@@ -70,7 +70,9 @@ gcloud functions deploy "${FUNCTION_NAME}" \
 # --timeout=3600s      : 1 hora — suficiente para extração full das tabelas silver
 #                        (grupo daily: ~1.25M linhas + upload GCS + carga BQ)
 #                        (grupo hourly: termina em ~90s — timeout não é limitante)
-# --memory=4Gi         : Necessário para processar 1.25M linhas em memória
+# --memory=8Gi         : Silver faz SELECT * de 1.25M linhas (215MB comprimido → ~3-4GB Python)
+#                        Testado: 4Gi causa OOM (excedeu por 2 MiB às 23:25 02/07/2026)
+#                        8Gi garante headroom suficiente para extração completa
 # --max-instances=1    : Evita execuções concorrentes que corrompem tmp/ e estado
 
 FUNCTION_URL=$(gcloud functions describe "${FUNCTION_NAME}" \
