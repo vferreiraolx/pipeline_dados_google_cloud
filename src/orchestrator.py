@@ -212,6 +212,14 @@ class Orchestrator:
                         custom_query = f.read()
                     rows = trino.extract_custom(custom_query, local_path)
                     extraction_type = "full"
+                elif table_cfg.always_full and partition_column:
+                    # Extração completa por partição: evita OOM em tabelas históricas grandes.
+                    # SELECT * único carregaria 1.25M+ linhas em memória Python; aqui
+                    # iteramos partição a partição mantendo footprint constante.
+                    rows = trino.extract_full_by_partitions(
+                        full_name, partition_column, local_path
+                    )
+                    extraction_type = "full"
                 elif is_first or table_cfg.use_max_dt or table_cfg.always_full:
                     rows = trino.extract_full(full_name, local_path)
                     extraction_type = "full"

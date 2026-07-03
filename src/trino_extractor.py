@@ -208,6 +208,138 @@ class TrinoExtractor:
 
         return self._execute_extraction(query, output_path, batch_size, table)
 
+    def extract_full_by_partitions(
+        self,
+        table: str,
+        partition_column: str,
+        output_path: str,
+        batch_size: int = 50_000,
+    ) -> int:
+        """Extração completa iterando sobre cada partição individualmente.
+
+        Evita OOM em tabelas históricas grandes (ex: re_silver_receita_cb_air,
+        1.25M linhas / 8GB+ em memória Python). Descobre as partições via
+        SELECT DISTINCT e itera, escrevendo no mesmo CSV de forma acumulativa.
+        Memória máxima por partição = batch_size × colunas × overhead_python.
+
+        Args:
+            table: Nome completo da tabela no Trino (ex: hive.planejamento.tabela).
+            partition_column: Coluna de partição (ex: 'dt').
+            output_path: Caminho do arquivo CSV de saída.
+            batch_size: Número de linhas por lote dentro de cada partição.
+
+        Returns:
+            Total de linhas extraídas.
+
+        Raises:
+            RuntimeError: Se a conexão não estiver estabelecida.
+            Exception: Se ocorrer erro durante a extração.
+        """
+        if self._connection is None:
+            raise RuntimeError(
+                "Conexão com Trino não estabelecida. Execute connect() primeiro."
+            )
+
+        # Descobre partições disponíveis em ordem cronológica
+        parts_query = (
+            f"SELECT DISTINCT {partition_column} FROM {table} "
+            f"ORDER BY {partition_column}"
+        )
+        logger.info(f"Descobrindo partições de {table} via: {parts_query}")
+        cursor = self._connection.cursor()
+        try:
+            cursor.execute(parts_query)
+            partitions = [row[0] for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+        logger.info(
+            f"Tabela {table}: {len(partitions)} partição(ões) encontrada(s). "
+            f"Extraindo partição por partição para limitar uso de memória."
+        )
+
+        total_rows = 0
+        header_written = False
+
+        for idx, partition_value in enumerate(partitions):
+            query = (
+                f"SELECT * FROM {table} "
+                f"WHERE {partition_column} = DATE '{partition_value}'"
+            )
+            logger.info(
+                f"Tabela {table}: extraindo partição {idx + 1}/{len(partitions)} "
+                f"({partition_column}='{partition_value}')"
+            )
+
+            part_rows = self._execute_extraction_append(
+                query=query,
+                output_path=output_path,
+                batch_size=batch_size,
+                table=table,
+                write_header=not header_written,
+            )
+            total_rows += part_rows
+            header_written = True
+
+            logger.info(
+                f"Tabela {table}: partição '{partition_value}' concluída "
+                f"({part_rows} linhas). Total acumulado: {total_rows}."
+            )
+
+        logger.info(
+            f"Extração completa por partições de {table} concluída. "
+            f"Total: {total_rows} linhas em {len(partitions)} partição(ões)."
+        )
+        return total_rows
+
+    def _execute_extraction_append(
+        self,
+        query: str,
+        output_path: str,
+        batch_size: int,
+        table: str,
+        write_header: bool,
+    ) -> int:
+        """Executa query e acrescenta resultados ao CSV (modo append).
+
+        Usado por extract_full_by_partitions para acumular partições num
+        único arquivo sem reabrir o CSV para leitura.
+
+        Args:
+            query: SQL a executar.
+            output_path: Caminho do CSV de saída.
+            batch_size: Linhas por fetchmany.
+            table: Nome da tabela (para logging).
+            write_header: Se True, escreve o cabeçalho na primeira linha.
+
+        Returns:
+            Número de linhas escritas nesta chamada.
+        """
+        total_rows = 0
+        cursor = self._connection.cursor()
+        mode = "w" if write_header else "a"
+
+        try:
+            cursor.execute(query)
+            columns = [desc[0] for desc in cursor.description]
+
+            with open(output_path, mode, newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                if write_header:
+                    writer.writerow(columns)
+
+                while True:
+                    rows = cursor.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    writer.writerows(rows)
+                    total_rows += len(rows)
+
+            return total_rows
+
+        finally:
+            cursor.close()
+
     def _execute_extraction(
         self, query: str, output_path: str, batch_size: int, table: str
     ) -> int:
