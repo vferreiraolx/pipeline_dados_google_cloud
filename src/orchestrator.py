@@ -494,7 +494,7 @@ class Orchestrator:
         Args:
             report: Dicionário de relatório para atualização do stage.
         """
-        datasource_id = os.getenv("TABLEAU_DATASOURCE_ID", "")
+        datasource_id = os.getenv("TABLEAU_WORKBOOK_ID", "")
         result = trigger_refresh(datasource_id)
 
         if not datasource_id:
