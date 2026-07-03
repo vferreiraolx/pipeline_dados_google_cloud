@@ -302,6 +302,51 @@ class TrinoExtractor:
         )
         return total_rows
 
+    def extract_date_range(
+        self,
+        table: str,
+        partition_column: str,
+        start_date: str,
+        end_date: str,
+        output_path: str,
+        batch_size: int = 10_000,
+    ) -> int:
+        """Extrai linhas onde partition_column >= start_date AND < end_date.
+
+        Usado no bootstrap mensal: cada chamada processa exatamente 1 mês
+        de dados históricos (≤100K linhas), eliminando o risco de OOM que
+        afeta a extração completa (1.25M+ linhas em memória Python).
+
+        Args:
+            table: Nome completo da tabela no Trino (ex: hive.planejamento.tabela).
+            partition_column: Coluna de partição de data (ex: 'dt').
+            start_date: Data inicial inclusiva no formato 'YYYY-MM-DD'.
+            end_date: Data final exclusiva no formato 'YYYY-MM-DD'.
+            output_path: Caminho do arquivo CSV de saída.
+            batch_size: Número de linhas por lote de fetchmany.
+
+        Returns:
+            Total de linhas extraídas no intervalo.
+
+        Raises:
+            RuntimeError: Se a conexão não estiver estabelecida.
+        """
+        if self._connection is None:
+            raise RuntimeError(
+                "Conexão com Trino não estabelecida. Execute connect() primeiro."
+            )
+
+        query = (
+            f"SELECT * FROM {table} "
+            f"WHERE {partition_column} >= DATE '{start_date}' "
+            f"AND {partition_column} < DATE '{end_date}'"
+        )
+        logger.info(
+            f"Extração de intervalo {table}: "
+            f"{partition_column} em [{start_date}, {end_date})"
+        )
+        return self._execute_extraction(query, output_path, batch_size, table)
+
     def _execute_extraction_append(
         self,
         query: str,
