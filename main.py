@@ -47,10 +47,17 @@ def pipeline_handler(request):
         # Determinar grupo de execução: "hourly" | "daily" | "all"
         group = request.args.get("group", "all")
 
+        # Bootstrap mensal opcional: "YYYY-MM" para carga histórica incremental.
+        # Quando informado, apenas tabelas com historical=True são processadas
+        # para aquele mês específico usando WRITE_APPEND (sem risco de OOM).
+        bootstrap_month = request.args.get("bootstrap_month")
+
         # Instanciar e executar o pipeline
         orchestrator = Orchestrator(config)
-        report = orchestrator.run(group=group)
+        report = orchestrator.run(group=group, bootstrap_month=bootstrap_month)
         report["group"] = group
+        if bootstrap_month:
+            report["bootstrap_month"] = bootstrap_month
 
         return (json.dumps(report, ensure_ascii=False), 200, headers)
 
