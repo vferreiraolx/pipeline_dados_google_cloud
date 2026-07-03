@@ -9,8 +9,10 @@ Nunca interrompe a execução por falhas individuais de tabelas —
 registra o erro e continua com as próximas tabelas.
 """
 
+import calendar
 import os
 from datetime import date
+from typing import Optional
 
 from src.bigquery_loader import BigQueryLoader
 from src.config_manager import ConfigManager
@@ -52,25 +54,29 @@ class Orchestrator:
         self.config = config
         self._logger = setup_logger("orchestrator")
 
-    def run(self, group: str = "all") -> dict:
+    def run(self, group: str = "all", bootstrap_month: Optional[str] = None) -> dict:
         """Executa o pipeline completo e retorna relatório de execução.
 
         Fluxo:
             1. Conectar ao Trino (abort se falhar após retries).
             2. Para cada tabela-fonte do grupo solicitado:
                a. Verificar estado (first_load ou incremental).
-               b. Extrair dados (full ou incremental).
+               b. Extrair dados (full, incremental ou date_range para bootstrap).
                c. Upload para GCS.
                d. Carregar no BigQuery.
                e. Registrar estado de extração.
             3. Fechar conexão Trino.
-            4. Executar tabelas derivadas em ordem.
-            5. Exportar para Google Sheets.
+            4. Executar tabelas derivadas (pulado se bootstrap_month informado).
+            5. Exportar para Google Sheets (pulado se bootstrap_month informado).
             6. Retornar relatório.
 
         Args:
             group: Grupo de cadência — "hourly" (só gold), "daily" (só silver)
                 ou "all" (todas as tabelas, comportamento legado).
+            bootstrap_month: Quando informado no formato "YYYY-MM", executa o
+                bootstrap mensal: extrai apenas tabelas com historical=True
+                para o mês especificado e carrega com WRITE_APPEND. Tabelas
+                derivadas e exportação Sheets são puladas.
 
         Returns:
             Dicionário com relatório de execução contendo:
@@ -124,7 +130,7 @@ class Orchestrator:
 
         # --- Etapas 2-4: Extração, Upload GCS, Carga BigQuery ---
         try:
-            self._process_source_tables(trino, report, group)
+            self._process_source_tables(trino, report, group, bootstrap_month=bootstrap_month)
         finally:
             # Sempre fechar conexão Trino
             trino.close()
@@ -133,11 +139,16 @@ class Orchestrator:
                 "Conexão com Trino fechada", self._logger,
             )
 
-        # --- Etapa 5: Tabelas derivadas ---
-        self._process_derived_tables(report)
+        if bootstrap_month:
+            # Bootstrap mensal: pula derivadas e Sheets — dados silver ainda incompletos.
+            report["stages"]["tabelas_derivadas"] = "pulado_bootstrap"
+            report["stages"]["exportacao_sheets"] = "pulado_bootstrap"
+        else:
+            # --- Etapa 5: Tabelas derivadas ---
+            self._process_derived_tables(report)
 
-        # --- Etapa 6: Exportação para Google Sheets ---
-        self._process_sheets_export(report)
+            # --- Etapa 6: Exportação para Google Sheets ---
+            self._process_sheets_export(report)
 
         # --- Determinar status geral ---
         if report["tables_failed"]:
@@ -145,7 +156,13 @@ class Orchestrator:
 
         return report
 
-    def _process_source_tables(self, trino: TrinoExtractor, report: dict, group: str = "all") -> None:
+    def _process_source_tables(
+        self,
+        trino: TrinoExtractor,
+        report: dict,
+        group: str = "all",
+        bootstrap_month: Optional[str] = None,
+    ) -> None:
         """Processa todas as tabelas-fonte do grupo: extração, upload e carga.
 
         Para cada tabela configurada no grupo:
@@ -155,6 +172,9 @@ class Orchestrator:
         - Carrega no BigQuery.
         - Registra estado no StateManager.
 
+        Quando bootstrap_month é informado, apenas tabelas com historical=True
+        são processadas, usando extract_date_range e WRITE_APPEND.
+
         Em caso de falha em qualquer etapa de uma tabela, registra o erro
         e pula para a próxima tabela.
 
@@ -162,8 +182,29 @@ class Orchestrator:
             trino: Instância do TrinoExtractor com conexão ativa.
             report: Dicionário de relatório para atualização.
             group: Grupo de cadência — filtra as tabelas a processar.
+            bootstrap_month: Mês no formato "YYYY-MM" para bootstrap mensal.
+                Quando informado, processa apenas tabelas históricas para
+                aquele mês específico com WRITE_APPEND.
         """
         source_tables = self.config.get_source_tables(group=group)
+
+        # Bootstrap mensal: filtra apenas tabelas históricas e calcula intervalo de datas.
+        bootstrap_start: Optional[str] = None
+        bootstrap_end: Optional[str] = None
+        if bootstrap_month:
+            source_tables = [t for t in source_tables if t.historical]
+            year, month = int(bootstrap_month[:4]), int(bootstrap_month[5:7])
+            bootstrap_start = f"{year}-{month:02d}-01"
+            last_day = calendar.monthrange(year, month)[1]
+            end_year = year + 1 if month == 12 else year
+            end_month = 1 if month == 12 else month + 1
+            bootstrap_end = f"{end_year}-{end_month:02d}-01"
+            log_step(
+                "BOOTSTRAP", "INICIO", "N/A", 0,
+                f"Bootstrap mensal {bootstrap_month}: {len(source_tables)} tabela(s) histórica(s), "
+                f"intervalo [{bootstrap_start}, {bootstrap_end})",
+                self._logger,
+            )
         state_manager = StateManager(project=self.config.project_id)
         gcs_uploader = GCSUploader(
             project=self.config.project_id,
@@ -201,7 +242,19 @@ class Orchestrator:
                     self._logger,
                 )
 
-                if table_cfg.sql_file:
+                if bootstrap_month and bootstrap_start and bootstrap_end and partition_column:
+                    # Bootstrap mensal: extrai apenas o mês solicitado (~≤100K linhas).
+                    # Usa WRITE_APPEND no BQ para acumular meses sem truncar os anteriores.
+                    log_step(
+                        "EXTRAÇÃO", "INICIO", table_name, 0,
+                        f"Bootstrap {bootstrap_month}: [{bootstrap_start}, {bootstrap_end})",
+                        self._logger,
+                    )
+                    rows = trino.extract_date_range(
+                        full_name, partition_column, bootstrap_start, bootstrap_end, local_path
+                    )
+                    extraction_type = "bootstrap"
+                elif table_cfg.sql_file:
                     # Extração com SQL customizado
                     sql_path = os.path.join(
                         os.path.dirname(os.path.abspath(self.config._config_path))
@@ -293,7 +346,10 @@ class Orchestrator:
                     self._logger,
                 )
 
-                if extraction_type == "full":
+                if extraction_type == "bootstrap":
+                    # Bootstrap mensal: WRITE_APPEND acumula meses sem truncar anteriores.
+                    bq_loader.load_append(gcs_uri, table_id, partition_column)
+                elif extraction_type == "full":
                     bq_loader.load_full(gcs_uri, table_id)
                 elif table_cfg.historical:
                     # Tabela histórica: WRITE_APPEND para preservar dados acumulados.
