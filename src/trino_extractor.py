@@ -6,6 +6,7 @@ de tabelas Hive em lotes, salvando os resultados em arquivos CSV.
 """
 
 import csv
+import ctypes
 import gc
 import logging
 import os
@@ -282,6 +283,13 @@ class TrinoExtractor:
             total_rows += part_rows
             header_written = True
             gc.collect()
+            # Força glibc a devolver blocos livres ao SO (libc.so.6 no Linux).
+            # gc.collect() marca objetos como coletáveis mas não retorna memória ao SO;
+            # malloc_trim(0) faz isso explicitamente, evitando OOM em longas séries de partições.
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass  # Silencioso em ambientes sem libc.so.6 (ex: macOS, testes locais)
 
             logger.info(
                 f"Tabela {table}: partição '{partition_value}' concluída "
