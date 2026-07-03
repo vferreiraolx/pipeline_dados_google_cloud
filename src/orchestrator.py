@@ -21,6 +21,7 @@ from src.gcs_uploader import GCSUploader
 from src.logger import log_step, setup_logger
 from src.sheets_exporter import SheetsExporter
 from src.state_manager import StateManager
+from src.tableau_trigger import trigger_refresh
 from src.trino_extractor import TrinoExtractor
 
 
@@ -95,6 +96,7 @@ class Orchestrator:
                 "upload_gcs": "não_executado",
                 "carga_bigquery": "não_executado",
                 "tabelas_derivadas": "não_executado",
+                "tableau_trigger": "não_executado",
                 "exportacao_sheets": "não_executado",
             },
         }
@@ -143,11 +145,17 @@ class Orchestrator:
             # Bootstrap mensal: pula derivadas e Sheets — dados silver ainda incompletos.
             report["stages"]["tabelas_derivadas"] = "pulado_bootstrap"
             report["stages"]["exportacao_sheets"] = "pulado_bootstrap"
+            report["stages"]["tableau_trigger"] = "pulado_bootstrap"
         else:
             # --- Etapa 5: Tabelas derivadas ---
             self._process_derived_tables(report)
 
-            # --- Etapa 6: Exportação para Google Sheets ---
+            # --- Etapa 6: Trigger Tableau (após derivadas, antes do Sheets) ---
+            # Só dispara quando derivadas concluíram sem falhas críticas.
+            # Graceful: falha do Tableau não altera overall_status.
+            self._trigger_tableau_refresh(report)
+
+            # --- Etapa 7: Exportação para Google Sheets ---
             self._process_sheets_export(report)
 
         # --- Determinar status geral ---
@@ -475,6 +483,30 @@ class Orchestrator:
                 all_ok = False
 
         report["stages"]["tabelas_derivadas"] = "sucesso" if all_ok else "falha_parcial"
+
+    def _trigger_tableau_refresh(self, report: dict) -> None:
+        """Dispara refresh da fonte de dados no Tableau Cloud após derivadas.
+
+        Graceful degradation: falha aqui nunca propaga nem altera overall_status.
+        Quando TABLEAU_DATASOURCE_ID não está configurado, etapa é marcada como
+        'não_configurado' e execução continua normalmente.
+
+        Args:
+            report: Dicionário de relatório para atualização do stage.
+        """
+        datasource_id = os.getenv("TABLEAU_DATASOURCE_ID", "")
+        result = trigger_refresh(datasource_id)
+
+        if not datasource_id:
+            report["stages"]["tableau_trigger"] = "não_configurado"
+        elif result.triggered:
+            report["stages"]["tableau_trigger"] = "sucesso"
+            report["tableau_trigger_job_id"] = result.job_id
+        else:
+            report["stages"]["tableau_trigger"] = "falha"
+            report["tableau_trigger_error"] = result.error
+            # NÃO adiciona em tables_failed — Tableau é best-effort,
+            # não deve degradar o overall_status do pipeline de dados.
 
     def _process_sheets_export(self, report: dict) -> None:
         """Exporta dados para Google Sheets conforme mapeamentos configurados.
