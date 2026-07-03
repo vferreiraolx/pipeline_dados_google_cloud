@@ -19,6 +19,7 @@ from src.config_manager import ConfigManager
 from src.exceptions import ConfigValidationError, CredentialError
 from src.gcs_uploader import GCSUploader
 from src.logger import log_step, setup_logger
+from src.quality_gate import validate as quality_gate_validate
 from src.sheets_exporter import SheetsExporter
 from src.state_manager import StateManager
 from src.tableau_trigger import trigger_refresh
@@ -90,6 +91,7 @@ class Orchestrator:
             "overall_status": "sucesso",
             "tables_processed": [],
             "tables_failed": [],
+            "quality_gate_status": "não_executado",
             "stages": {
                 "conexao_trino": "não_executado",
                 "extracao": "não_executado",
@@ -485,15 +487,48 @@ class Orchestrator:
         report["stages"]["tabelas_derivadas"] = "sucesso" if all_ok else "falha_parcial"
 
     def _trigger_tableau_refresh(self, report: dict) -> None:
-        """Dispara refresh da fonte de dados no Tableau Cloud após derivadas.
+        """Executa quality gate e, se aprovado, dispara refresh do Tableau Cloud.
 
-        Graceful degradation: falha aqui nunca propaga nem altera overall_status.
-        Quando TABLEAU_DATASOURCE_ID não está configurado, etapa é marcada como
-        'não_configurado' e execução continua normalmente.
+        Fluxo:
+            1. Quality gate valida gold e derivadas no BQ.
+            2. Se gate falha → trigger suprimido, alerta no log, sem alterar overall_status.
+            3. Se gate passa → trigger_refresh() acionado (graceful, nunca propaga).
+            4. Falha do Tableau (auth, rede) → registrado em report, sem afetar overall_status.
 
         Args:
             report: Dicionário de relatório para atualização do stage.
         """
+        from google.cloud import bigquery as _bq
+
+        bq_client = _bq.Client(project=self.config.project_id)
+
+        # --- Quality Gate ---
+        gate_result_passed = False
+        try:
+            gate_result = quality_gate_validate(bq_client)
+            gate_result_passed = gate_result.passed
+            if gate_result.passed:
+                report["quality_gate_status"] = "passed"
+            else:
+                report["quality_gate_status"] = "failed"
+                report["quality_gate_failures"] = gate_result.failures
+                log_step(
+                    "QUALITY_GATE", "FALHA", "N/A", 0,
+                    f"Trigger Tableau suprimido — gate falhou: {gate_result.failures}",
+                    self._logger,
+                )
+        except Exception as e:
+            report["quality_gate_status"] = "erro_interno"
+            report["quality_gate_failures"] = [f"Gate não executou: {e}"]
+            logger.warning("[QUALITY_GATE] [ERRO] Gate falhou internamente: %s", e)
+
+        bq_client.close()
+
+        if not gate_result_passed:
+            report["stages"]["tableau_trigger"] = "suprimido_quality_gate"
+            return
+
+        # --- Trigger Tableau ---
         datasource_id = os.getenv("TABLEAU_WORKBOOK_ID", "")
         result = trigger_refresh(datasource_id)
 
@@ -505,8 +540,6 @@ class Orchestrator:
         else:
             report["stages"]["tableau_trigger"] = "falha"
             report["tableau_trigger_error"] = result.error
-            # NÃO adiciona em tables_failed — Tableau é best-effort,
-            # não deve degradar o overall_status do pipeline de dados.
 
     def _process_sheets_export(self, report: dict) -> None:
         """Exporta dados para Google Sheets conforme mapeamentos configurados.
