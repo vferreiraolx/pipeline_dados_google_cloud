@@ -216,6 +216,12 @@ class Orchestrator:
                     # Extração completa por partição: evita OOM em tabelas históricas grandes.
                     # SELECT * único carregaria 1.25M+ linhas em memória Python; aqui
                     # iteramos partição a partição mantendo footprint constante.
+                    log_step(
+                        "EXTRAÇÃO", "DEBUG", table_name, 0,
+                        f"[DIAGNÓSTICO] always_full=True, partition_col='{partition_column}' "
+                        f"→ usando extract_full_by_partitions",
+                        self._logger,
+                    )
                     rows = trino.extract_full_by_partitions(
                         full_name, partition_column, local_path
                     )

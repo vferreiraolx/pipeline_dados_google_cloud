@@ -6,6 +6,7 @@ de tabelas Hive em lotes, salvando os resultados em arquivos CSV.
 """
 
 import csv
+import gc
 import logging
 import os
 import time
@@ -213,7 +214,7 @@ class TrinoExtractor:
         table: str,
         partition_column: str,
         output_path: str,
-        batch_size: int = 50_000,
+        batch_size: int = 10_000,
     ) -> int:
         """Extração completa iterando sobre cada partição individualmente.
 
@@ -280,6 +281,7 @@ class TrinoExtractor:
             )
             total_rows += part_rows
             header_written = True
+            gc.collect()
 
             logger.info(
                 f"Tabela {table}: partição '{partition_value}' concluída "
