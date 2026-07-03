@@ -305,6 +305,25 @@ class Orchestrator:
                 extraction_ok = False
                 continue
 
+            # Tabelas horárias (gold) com 0 linhas: pula carga para não apagar
+            # a partição existente do dia anterior — preserva histórico no Tableau.
+            if rows == 0 and table_cfg.group == "hourly":
+                log_step(
+                    "CARGA_BQ", "SKIP", table_name, 0,
+                    "Zero linhas extraídas (Trino sem dados para hoje) — "
+                    "partição anterior preservada, carga ignorada",
+                    self._logger,
+                )
+                state_manager.mark_loaded(
+                    table_name=table_name,
+                    load_date=today_str,
+                    rows_count=0,
+                    extraction_type=extraction_type,
+                    status="skip_zero_rows",
+                )
+                report["tables_processed"].append(table_name)
+                continue
+
             # Upload para GCS
             try:
                 gcs_path = gcs_uploader.build_gcs_path(table_name, today)
@@ -353,8 +372,12 @@ class Orchestrator:
                     bq_loader.load_full(gcs_uri, table_id)
                 elif table_cfg.historical:
                     # Tabela histórica: WRITE_APPEND para preservar dados acumulados.
-                    # Evita substituir 1.25M+ linhas históricas com só o dia de hoje.
                     bq_loader.load_append(gcs_uri, table_id, partition_column)
+                elif table_cfg.group == "hourly":
+                    # Tabela horária (gold): substitui apenas a partição de hoje.
+                    # WRITE_TRUNCATE total apagaria todo o histórico quando Trino
+                    # não tem dados do dia corrente; partition load preserva ontem.
+                    bq_loader.load_partition(gcs_uri, table_id, today)
                 else:
                     bq_loader.load_incremental(
                         gcs_uri, table_id, partition_column
