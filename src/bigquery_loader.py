@@ -8,6 +8,7 @@ Todas as mensagens de log são em português.
 
 import logging
 import re
+from datetime import date
 
 from google.cloud import bigquery
 
@@ -88,6 +89,91 @@ class BigQueryLoader:
                 "[CARGA_BQ] [FALHA] Tabela: %s | Modo: FULL | "
                 "Erro: %s",
                 table_id,
+                str(e),
+            )
+
+    def load_partition(
+        self, gcs_uri: str, table_id: str, partition_date: date
+    ) -> None:
+        """Carga idempotente em partição específica da tabela (WRITE_TRUNCATE da partição).
+
+        Substitui apenas os dados da partição dt=partition_date, preservando todas
+        as demais partições. Resolve o problema de zeros no Tableau causado pelo
+        WRITE_TRUNCATE total (que apagava todas as partições quando o Trino ainda
+        não tinha dados do dia).
+
+        Requer que a tabela destino seja date-partitioned pela coluna 'dt'.
+
+        Schema do gold (re_gold_receita_unificado_air):
+            advertiser_id STRING, mes_base DATE, tamanho STRING, pacote STRING,
+            estado STRING, municipio STRING, ultimo_mes_pagamento DATE,
+            status_ts STRING, faturado_mes FLOAT64, classificacao STRING,
+            classificacao_rec STRING, classificacao_churn STRING, vigencia_bt STRING,
+            dt_cancelado DATE, delta FLOAT64, day_base DATE, day_churn DATE,
+            faturado_mes_campanha FLOAT64, status_ts_campanha STRING,
+            pago_mes_campanha FLOAT64, faturado_mes_bairro_vip FLOAT64,
+            status_ts_bairro_vip STRING, pago_mes_bairro FLOAT64,
+            faturado_mes_topo_fixo FLOAT64, status_ts_topo_fixo STRING,
+            pago_mes_topo FLOAT64, total_faturado_sva FLOAT64,
+            total_pago_sva FLOAT64, canal_conta STRING, dono_conta STRING,
+            dt DATE, cordenador STRING, advertiser_industry STRING
+
+        Args:
+            gcs_uri: URI do arquivo CSV no GCS (ex: gs://bucket/path/table_2026-07-03.csv).
+            table_id: ID completo da tabela BigQuery de destino
+                (ex: projeto.dataset.tabela). NÃO incluir o sufixo $YYYYMMDD.
+            partition_date: Data da partição a substituir. Apenas os dados
+                desta data serão substituídos.
+
+        Raises:
+            Não lança exceção. Registra erro via logging em caso de falha.
+        """
+        try:
+            partition_suffix = partition_date.strftime("%Y%m%d")
+            table_partition_id = f"{table_id}${partition_suffix}"
+
+            logger.info(
+                "[CARGA_BQ] [INICIO] Tabela: %s | Modo: PARTITION | "
+                "Partição: %s | Origem: %s",
+                table_id,
+                partition_date.isoformat(),
+                gcs_uri,
+            )
+
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                autodetect=True,
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+                skip_leading_rows=1,
+                time_partitioning=bigquery.TimePartitioning(
+                    type_=bigquery.TimePartitioningType.DAY,
+                    field="dt",
+                ),
+            )
+
+            load_job = self._client.load_table_from_uri(
+                gcs_uri,
+                table_partition_id,
+                job_config=job_config,
+            )
+
+            load_job.result()
+
+            table = self._client.get_table(table_id)
+            logger.info(
+                "[CARGA_BQ] [SUCESSO] Tabela: %s | Registros totais: %d | "
+                "Partição %s substituída (histórico preservado)",
+                table_id,
+                table.num_rows,
+                partition_date.isoformat(),
+            )
+
+        except Exception as e:
+            logger.error(
+                "[CARGA_BQ] [FALHA] Tabela: %s | Modo: PARTITION | "
+                "Partição: %s | Erro: %s",
+                table_id,
+                partition_date.isoformat() if partition_date else "N/A",
                 str(e),
             )
 
