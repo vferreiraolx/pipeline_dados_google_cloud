@@ -31,6 +31,9 @@ class SourceTableConfig:
         always_full: Se True, sempre faz extração completa independente do
             estado (necessário para tabelas históricas onde dt não é snapshot
             do dia atual, como re_silver_receita_cb_air).
+        historical: Se True, cargas incrementais (pós-bootstrap) usam
+            WRITE_APPEND para acumular histórico. Se False (padrão), usam
+            WRITE_TRUNCATE para substituir o snapshot diário.
     """
 
     full_name: str
@@ -40,6 +43,7 @@ class SourceTableConfig:
     use_max_dt: bool = False
     group: str = "all"
     always_full: bool = False
+    historical: bool = False
 
 
 @dataclass

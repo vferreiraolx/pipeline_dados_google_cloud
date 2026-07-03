@@ -295,6 +295,10 @@ class Orchestrator:
 
                 if extraction_type == "full":
                     bq_loader.load_full(gcs_uri, table_id)
+                elif table_cfg.historical:
+                    # Tabela histórica: WRITE_APPEND para preservar dados acumulados.
+                    # Evita substituir 1.25M+ linhas históricas com só o dia de hoje.
+                    bq_loader.load_append(gcs_uri, table_id, partition_column)
                 else:
                     bq_loader.load_incremental(
                         gcs_uri, table_id, partition_column

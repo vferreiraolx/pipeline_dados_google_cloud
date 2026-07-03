@@ -22,18 +22,21 @@ extraction:
       short_name: "re_silver_receita_cb_air"
       partition_column: "dt"
       group: "daily"
-      always_full: true
+      always_full: true   # manter true até bootstrap concluído; depois: false
+      historical: true    # pós-bootstrap: WRITE_APPEND (não destroi histórico)
     - full_name: "hive.planejamento.re_silver_planos_periodicos_cb"
       short_name: "re_silver_planos_periodicos_cb"
       partition_column: "dt"
       use_max_dt: true
       group: "daily"
-      always_full: true
+      always_full: true   # manter true até bootstrap concluído; depois: false
+      historical: true
     - full_name: "hive.planejamento.re_silver_receita_cb_paids_air"
       short_name: "re_silver_receita_cb_paids_air"
       partition_column: "dt"
       group: "daily"
-      always_full: true
+      always_full: true   # manter true até bootstrap concluído; depois: false
+      historical: true
     - full_name: "custom_sql"
       short_name: "desconto_faseado"
       partition_column: ""

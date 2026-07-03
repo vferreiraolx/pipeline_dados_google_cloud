@@ -295,6 +295,7 @@ class ConfigManager:
                 use_max_dt=t.get("use_max_dt", False),
                 group=t.get("group", "all"),
                 always_full=t.get("always_full", False),
+                historical=t.get("historical", False),
             )
             for t in tables
         ]

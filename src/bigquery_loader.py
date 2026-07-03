@@ -91,6 +91,65 @@ class BigQueryLoader:
                 str(e),
             )
 
+    def load_append(
+        self, gcs_uri: str, table_id: str, partition_column: str = "dt"
+    ) -> None:
+        """Carga incremental histórica: APPEND para preservar dados anteriores.
+
+        Usada por tabelas históricas (ex: silver) onde cada execução diária
+        adiciona apenas os dados do dia, sem apagar o histórico acumulado.
+
+        Args:
+            gcs_uri: URI do arquivo no GCS (ex: gs://bucket/table/table_2024-01-15.csv).
+            table_id: ID completo da tabela BigQuery de destino.
+            partition_column: Nome da coluna de partição. Padrão: 'dt'.
+
+        Raises:
+            Não lança exceção. Registra erro via logging em caso de falha.
+        """
+        try:
+            logger.info(
+                "[CARGA_BQ] [INICIO] Tabela: %s | Modo: APPEND | "
+                "Origem: %s | Coluna partição: %s",
+                table_id,
+                gcs_uri,
+                partition_column,
+            )
+
+            partition_date = self._extract_date_from_uri(gcs_uri)
+
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                autodetect=True,
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                skip_leading_rows=1,
+            )
+
+            load_job = self._client.load_table_from_uri(
+                gcs_uri,
+                table_id,
+                job_config=job_config,
+            )
+
+            load_job.result()
+
+            table = self._client.get_table(table_id)
+            logger.info(
+                "[CARGA_BQ] [SUCESSO] Tabela: %s | Registros: %d | "
+                "Carga append concluída (dt='%s')",
+                table_id,
+                table.num_rows,
+                partition_date,
+            )
+
+        except Exception as e:
+            logger.error(
+                "[CARGA_BQ] [FALHA] Tabela: %s | Modo: APPEND | "
+                "Erro: %s",
+                table_id,
+                str(e),
+            )
+
     def load_incremental(
         self, gcs_uri: str, table_id: str, partition_column: str = "dt"
     ) -> None:
