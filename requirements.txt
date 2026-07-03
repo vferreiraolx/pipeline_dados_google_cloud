@@ -4,3 +4,4 @@ google-cloud-bigquery==3.14.1
 gspread==6.0.2
 google-auth==2.27.0
 pyyaml==6.0.1
+tableauserverclient==0.25
